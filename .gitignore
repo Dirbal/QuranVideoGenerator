@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Build output
+.next/
+out/
+
+# Environment
+.env.local
+.env*.local
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temp files
+tmp/
+
+# Large binaries — never commit these
+*.zip
+*.tar.gz
+*.exe
+/ffmpeg-full*
