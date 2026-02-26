@@ -18,12 +18,10 @@ FROM node:22-alpine AS runner
 
 WORKDIR /app
 
-# Install FFmpeg with libass (HarfBuzz for Arabic shaping), freetype, fontconfig
+# Install FFmpeg with libass (HarfBuzz for Arabic shaping) + fontconfig
 RUN apk add --no-cache \
     ffmpeg \
-    font-noto \
-    fontconfig \
-    && fc-cache -fv
+    fontconfig
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
@@ -32,6 +30,11 @@ ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
+
+# Register project fonts with fontconfig so libass can find them
+RUN mkdir -p /usr/share/fonts/app && \
+    cp /app/public/fonts/*.ttf /usr/share/fonts/app/ && \
+    fc-cache -fv
 
 EXPOSE 3000
 ENV PORT=3000

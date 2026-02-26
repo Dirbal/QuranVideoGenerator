@@ -348,7 +348,22 @@ export async function generateVideo(
 
         // Build font path from project's public/fonts/ directory
         const rawFontPath = path.join(process.cwd(), 'public', 'fonts', fontFile);
-        const fontName = fontFile.replace(/\.(ttf|otf|woff2?)$/i, '').replace(/-/g, ' ');
+
+        // Map font filename → internal font name (as registered in fontconfig)
+        const FONT_INTERNAL_NAMES: Record<string, string> = {
+            'Amiri.ttf': 'Amiri',
+            'Amiri-Bold.ttf': 'Amiri',
+            'NotoNaskhArabic.ttf': 'Noto Naskh Arabic',
+            'ArefRuqaa.ttf': 'Aref Ruqaa',
+            'ArefRuqaa-Bold.ttf': 'Aref Ruqaa',
+            'Cairo.ttf': 'Cairo',
+            'Tajawal.ttf': 'Tajawal',
+            'Tajawal-Bold.ttf': 'Tajawal',
+            'Almarai.ttf': 'Almarai',
+            'Lemonada.ttf': 'Lemonada',
+        };
+        const fontName = FONT_INTERNAL_NAMES[fontFile] || fontFile.replace(/\.(ttf|otf|woff2?)$/i, '');
+        const isBold = fontFile.toLowerCase().includes('bold');
 
         // Wider lines = more natural text flow
         const maxCharsPerLine = width >= 1280 ? 55 : width >= 720 ? 42 : 32;
@@ -382,8 +397,8 @@ WrapStyle: 0
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Verse,${fontName},48,&H00FFFFFF,&H000000FF,&H00000000,&H96000000,0,0,0,0,100,100,0,0,1,3,2,5,40,40,30,0
-Style: VerseNum,${fontName},24,&H0037AFD4,&H000000FF,&H00000000,&H96000000,0,0,0,0,100,100,0,0,1,2,1,5,40,40,20,0
+Style: Verse,${fontName},48,&H00FFFFFF,&H000000FF,&H00000000,&H96000000,${isBold ? -1 : 0},0,0,0,100,100,0,0,1,3,2,5,40,40,30,0
+Style: VerseNum,${fontName},24,&H0037AFD4,&H000000FF,&H00000000,&H96000000,${isBold ? -1 : 0},0,0,0,100,100,0,0,1,2,1,5,40,40,20,0
 Style: Tafsir,${fontName},26,&H00E8E8E8,&H000000FF,&H00000000,&H96000000,0,0,0,0,100,100,0,0,1,2,1,5,50,50,20,0
 
 [Fonts]
