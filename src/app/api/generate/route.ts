@@ -98,10 +98,10 @@ export async function POST(req: NextRequest) {
             },
         });
     } catch (error: any) {
-        console.error('Video generation error:', error);
+        console.error('Video generation error:', error?.message, error?.stack);
         if (outputPath) cleanupTempDir(outputPath);
         return NextResponse.json(
-            { error: error.message || 'Video generation failed' },
+            { error: error?.message || 'Video generation failed', details: String(error) },
             { status: 500 }
         );
     }

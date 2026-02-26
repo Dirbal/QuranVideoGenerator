@@ -18,8 +18,12 @@ FROM node:22-alpine AS runner
 
 WORKDIR /app
 
-# Install FFmpeg with full features (libass, harfbuzz, freetype, fontconfig)
-RUN apk add --no-cache ffmpeg
+# Install FFmpeg with libass (HarfBuzz for Arabic shaping), freetype, fontconfig
+RUN apk add --no-cache \
+    ffmpeg \
+    font-noto \
+    fontconfig \
+    && fc-cache -fv
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1

@@ -6,17 +6,19 @@ import { v4 as uuidv4 } from 'uuid';
 import os from 'os';
 import { execSync } from 'child_process';
 
-// Use system FFmpeg (Docker with libass/harfbuzz) if available, else npm package
+// Use system FFmpeg (Docker/Linux) if available, else npm package (local dev)
 function findBinary(name: string, npmPkg: string): string {
     try {
-        const sysPath = execSync(`which ${name} 2>/dev/null || where ${name} 2>nul`, { encoding: 'utf8' }).trim().split('\n')[0];
+        // Works on both Linux and Windows
+        const cmd = process.platform === 'win32' ? `where ${name}` : `command -v ${name}`;
+        const sysPath = execSync(cmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim().split(/\r?\n/)[0];
         if (sysPath) return sysPath;
     } catch { /* not in PATH */ }
     try {
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         return require(npmPkg).path;
     } catch { /* not installed */ }
-    return name; // hope it's in PATH
+    return name;
 }
 
 ffmpeg.setFfmpegPath(findBinary('ffmpeg', '@ffmpeg-installer/ffmpeg'));
