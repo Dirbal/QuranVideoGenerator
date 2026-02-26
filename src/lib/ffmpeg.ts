@@ -393,6 +393,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 `;
 
         const assEvents: string[] = [];
+        const centerX = Math.round(width / 2);
 
         for (let i = 0; i < verses.length; i++) {
             const start = cumulativeTime;
@@ -403,37 +404,55 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             const verseRaw = normalizeArabicText(verses[i].text);
             const verseNum = verses[i].verseKey.split(':')[1] || verses[i].verseKey;
             const fontSize = getASSFontSize(verseRaw);
+            const lineHeight = Math.round(fontSize * 1.9);
 
-            // Build verse text with line breaks
             const lines = splitIntoLines(verseRaw, maxCharsPerLine);
-            const verseText = lines.join('\\N');
+            const totalTextHeight = lines.length * lineHeight;
 
-            // Fade in/out: {\fad(500,400)}
+            // Verse number dimensions
+            const vnFS = Math.round(fontSize * 0.45);
+            const vnH = Math.round(vnFS * 2.5);
+
+            // Tafsir dimensions
+            const hasTafsir = !!verses[i].tafsirText;
+            const tafsirFS = hasTafsir ? Math.round(fontSize * 0.48) : 0;
+            const tafsirLineH = Math.round(tafsirFS * 1.8);
+            const tafsirReserve = hasTafsir ? (tafsirLineH * 2 + 16) : 0;
+
+            // Total block height → center vertically
+            const totalBlockH = totalTextHeight + vnH + tafsirReserve;
+            const blockY = Math.round((height / 2) - (totalBlockH / 2));
+
+            // Fade
             const fade = `{\\fad(500,400)}`;
 
-            // Verse text — positioned at center with font size override
+            // ── Verse text lines: each line positioned individually ──
+            for (let ln = 0; ln < lines.length; ln++) {
+                const yPos = blockY + (ln * lineHeight);
+                assEvents.push(
+                    `Dialogue: 0,${startT},${endT},Verse,,0,0,0,,${fade}{\\fs${fontSize}\\pos(${centerX},${yPos})}${lines[ln]}`
+                );
+            }
+
+            // ── Verse number ﴿N﴾ — below verse text ──
+            const vnY = blockY + totalTextHeight + Math.round(vnH * 0.5);
             assEvents.push(
-                `Dialogue: 0,${startT},${endT},Verse,,0,0,0,,${fade}{\\fs${fontSize}}${verseText}`
+                `Dialogue: 1,${startT},${endT},VerseNum,,0,0,0,,${fade}{\\fs${vnFS}\\pos(${centerX},${vnY})}﴿${verseNum}﴾`
             );
 
-            // Verse number ﴿N﴾ — below verse text
-            const vnFS = Math.round(fontSize * 0.45);
-            assEvents.push(
-                `Dialogue: 1,${startT},${endT},VerseNum,,0,0,0,,${fade}{\\fs${vnFS}}﴿${verseNum}﴾`
-            );
-
-            // Tafsir text
-            if (verses[i].tafsirText) {
+            // ── Tafsir text — below verse number ──
+            if (hasTafsir) {
                 const tafsirRaw = normalizeArabicText(
                     verses[i].tafsirText!.substring(0, 120) + (verses[i].tafsirText!.length > 120 ? '...' : '')
                 );
-                const tafsirFS = Math.round(fontSize * 0.48);
                 const tafsirMaxChars = maxCharsPerLine + 10;
                 const tafsirLines = splitIntoLines(tafsirRaw, tafsirMaxChars).slice(0, 2);
-                const tafsirText = tafsirLines.join('\\N');
-                assEvents.push(
-                    `Dialogue: 2,${startT},${endT},Tafsir,,0,0,0,,${fade}{\\fs${tafsirFS}}${tafsirText}`
-                );
+                const tafsirY = vnY + vnH;
+                for (let tl = 0; tl < tafsirLines.length; tl++) {
+                    assEvents.push(
+                        `Dialogue: 2,${startT},${endT},Tafsir,,0,0,0,,${fade}{\\fs${tafsirFS}\\pos(${centerX},${tafsirY + tl * tafsirLineH})}${tafsirLines[tl]}`
+                    );
+                }
             }
 
             cumulativeTime = end;
