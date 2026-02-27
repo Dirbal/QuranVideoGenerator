@@ -8,6 +8,7 @@ export const maxDuration = 300; // 5 min timeout
 
 export async function POST(req: NextRequest) {
     let outputPath = '';
+    let tmpDir = '';
 
     try {
         const body = await req.json();
@@ -21,7 +22,7 @@ export async function POST(req: NextRequest) {
             dimOpacity = 0.5,
             videoWidth = 1280,
             videoHeight = 720,
-            fontFile = 'arial.ttf',
+            fontFile = 'Amiri.ttf',
         } = body as {
             chapter: number;
             from: number;
@@ -63,7 +64,6 @@ export async function POST(req: NextRequest) {
             for (const v of verses) {
                 const text = await getTafsir(chapter, v.verse_number);
                 if (text) {
-                    // Strip HTML tags
                     const cleanText = text.replace(/<[^>]*>/g, '').substring(0, 200);
                     tafsirMap.set(v.verse_key, cleanText);
                 }
@@ -83,23 +83,41 @@ export async function POST(req: NextRequest) {
 
         // 6) Generate video
         outputPath = await generateVideo(overlays, bgUrl, dimOpacity, videoWidth, videoHeight, fontFile);
+        tmpDir = require('path').dirname(outputPath);
 
-        // 7) Stream the file as response
-        const fileBuffer = fs.readFileSync(outputPath);
+        // 7) Stream the file as response (avoid loading entire file into memory)
+        const stat = fs.statSync(outputPath);
+        const stream = fs.createReadStream(outputPath);
 
-        // Cleanup after sending
-        setTimeout(() => cleanupTempDir(outputPath), 5000);
+        // Convert Node ReadStream to Web ReadableStream
+        const webStream = new ReadableStream({
+            start(controller) {
+                stream.on('data', (chunk: Buffer) => {
+                    controller.enqueue(new Uint8Array(chunk));
+                });
+                stream.on('end', () => {
+                    controller.close();
+                    // Cleanup after streaming
+                    setTimeout(() => cleanupTempDir(outputPath), 3000);
+                });
+                stream.on('error', (err) => {
+                    controller.error(err);
+                    cleanupTempDir(outputPath);
+                });
+            },
+        });
 
-        return new NextResponse(fileBuffer, {
+        return new NextResponse(webStream, {
             headers: {
                 'Content-Type': 'video/mp4',
                 'Content-Disposition': `attachment; filename="quran_${chapter}_${from}-${to}.mp4"`,
-                'Content-Length': String(fileBuffer.length),
+                'Content-Length': String(stat.size),
             },
         });
     } catch (error: any) {
         console.error('Video generation error:', error?.message, error?.stack);
         if (outputPath) cleanupTempDir(outputPath);
+        else if (tmpDir) try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { }
         return NextResponse.json(
             { error: error?.message || 'Video generation failed', details: String(error) },
             { status: 500 }
