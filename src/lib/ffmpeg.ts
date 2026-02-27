@@ -343,129 +343,99 @@ export async function generateVideo(
 
         const totalDuration = audioInfos.reduce((s, a) => s + a.duration, 0);
 
-        // 5) Build ASS subtitle file — libass has HarfBuzz for proper Arabic shaping
+        // 5) Build drawtext filters
         let cumulativeTime = 0;
+        const textFilters: string[] = [];
 
-        // Build font path from project's public/fonts/ directory
+        // Font path for drawtext
         const rawFontPath = path.join(process.cwd(), 'public', 'fonts', fontFile);
+        const fontPath = rawFontPath.replace(/\\/g, '/').replace(':', '\\:');
 
-        // Map font filename → internal font name (as registered in fontconfig)
-        const FONT_INTERNAL_NAMES: Record<string, string> = {
-            'Amiri.ttf': 'Amiri',
-            'Amiri-Bold.ttf': 'Amiri',
-            'NotoNaskhArabic.ttf': 'Noto Naskh Arabic',
-            'ArefRuqaa.ttf': 'Aref Ruqaa',
-            'ArefRuqaa-Bold.ttf': 'Aref Ruqaa',
-            'Cairo.ttf': 'Cairo',
-            'Tajawal.ttf': 'Tajawal',
-            'Tajawal-Bold.ttf': 'Tajawal',
-            'Almarai.ttf': 'Almarai',
-            'Lemonada.ttf': 'Lemonada',
-        };
-        const fontName = FONT_INTERNAL_NAMES[fontFile] || fontFile.replace(/\.(ttf|otf|woff2?)$/i, '');
-        const isBold = fontFile.toLowerCase().includes('bold');
+        // Check if system FFmpeg has HarfBuzz (Docker/Render=yes, local npm=no)
+        let hasHarfBuzz = false;
+        try {
+            const conf = execSync('ffmpeg -buildconf 2>&1', { encoding: 'utf8', timeout: 5000 });
+            hasHarfBuzz = conf.includes('harfbuzz');
+        } catch { /* assume no */ }
 
-        // Wider lines = more natural text flow
+        // Text shadow/outline for readability
+        const textStyle = `shadowcolor=black@0.7:shadowx=2:shadowy=2:borderw=3:bordercolor=black@0.5`;
+
+        // text_shaping=1 for HarfBuzz (connected Arabic), fallback to reshaper
+        const shaping = hasHarfBuzz ? ':text_shaping=1' : '';
+
+        function prepareText(text: string): string {
+            const normalized = normalizeArabicText(text);
+            if (hasHarfBuzz) {
+                // HarfBuzz handles everything: connections, diacritics, bidi
+                return escapeFFmpegText(normalized);
+            }
+            // Local fallback: reshape + reverse for fonts with Presentation Forms
+            return escapeFFmpegText(reshapeForFFmpeg(normalized, fontFile));
+        }
+
         const maxCharsPerLine = width >= 1280 ? 55 : width >= 720 ? 42 : 32;
-
-        // ASS time format: H:MM:SS.CC (centiseconds)
-        function toASSTime(seconds: number): string {
-            const h = Math.floor(seconds / 3600);
-            const m = Math.floor((seconds % 3600) / 60);
-            const s = seconds % 60;
-            return `${h}:${String(m).padStart(2, '0')}:${s.toFixed(2).padStart(5, '0')}`;
-        }
-
-        // Adaptive font size for ASS (slightly larger than drawtext)
-        function getASSFontSize(text: string): number {
-            const vLen = visibleLength(text);
-            const base = width >= 1280 ? 54 : width >= 720 ? 44 : 36;
-            if (vLen < 30) return base;
-            if (vLen < 60) return Math.round(base * 0.82);
-            if (vLen < 100) return Math.round(base * 0.68);
-            if (vLen < 150) return Math.round(base * 0.56);
-            return Math.round(base * 0.48);
-        }
-
-        // ASS header with font attachment and styles
-        const assHeader = `[Script Info]
-Title: Quran Video
-ScriptType: v4.00+
-PlayResX: ${width}
-PlayResY: ${height}
-WrapStyle: 0
-
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Verse,${fontName},48,&H00FFFFFF,&H000000FF,&H00000000,&H96000000,${isBold ? -1 : 0},0,0,0,100,100,0,0,1,3,2,5,40,40,30,0
-Style: VerseNum,${fontName},24,&H0037AFD4,&H000000FF,&H00000000,&H96000000,${isBold ? -1 : 0},0,0,0,100,100,0,0,1,2,1,5,40,40,20,0
-Style: Tafsir,${fontName},26,&H00E8E8E8,&H000000FF,&H00000000,&H96000000,0,0,0,0,100,100,0,0,1,2,1,5,50,50,20,0
-
-[Fonts]
-
-[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-`;
-
-        const assEvents: string[] = [];
-        const centerX = Math.round(width / 2);
 
         for (let i = 0; i < verses.length; i++) {
             const start = cumulativeTime;
             const end = cumulativeTime + audioInfos[i].duration;
-            const startT = toASSTime(start);
-            const endT = toASSTime(end);
+            const fadeIn = Math.min(start + 0.5, end);
+            const fadeOutStart = Math.max(start, end - 0.4);
 
-            const verseRaw = normalizeArabicText(verses[i].text);
+            const verseRaw = verses[i].text;
             const verseNum = verses[i].verseKey.split(':')[1] || verses[i].verseKey;
-            const fontSize = getASSFontSize(verseRaw);
+
+            const fontSize = getAdaptiveFontSize(verseRaw, width);
             const lineHeight = Math.round(fontSize * 1.9);
 
             const lines = splitIntoLines(verseRaw, maxCharsPerLine);
             const totalTextHeight = lines.length * lineHeight;
 
-            // Verse number dimensions
             const vnFS = Math.round(fontSize * 0.45);
-            const vnH = Math.round(vnFS * 2.5);
+            const vnH = Math.round(vnFS * 2);
 
-            // Tafsir dimensions
             const hasTafsir = !!verses[i].tafsirText;
             const tafsirFS = hasTafsir ? Math.round(fontSize * 0.48) : 0;
             const tafsirLineH = Math.round(tafsirFS * 1.8);
             const tafsirReserve = hasTafsir ? (tafsirLineH * 2 + 16) : 0;
-
-            // Total block height → center vertically
             const totalBlockH = totalTextHeight + vnH + tafsirReserve;
             const blockY = Math.round((height / 2) - (totalBlockH / 2));
 
-            // Fade
-            const fade = `{\\fad(500,400)}`;
+            const enb = buildEnable(start, end);
+            const fad = buildFadeAlpha(start, fadeIn, fadeOutStart, end);
 
-            // ── Verse text lines: each line positioned individually ──
+            // ── Verse text lines ──
             for (let ln = 0; ln < lines.length; ln++) {
+                const lineText = prepareText(lines[ln]);
                 const yPos = blockY + (ln * lineHeight);
-                assEvents.push(
-                    `Dialogue: 0,${startT},${endT},Verse,,0,0,0,,${fade}{\\fs${fontSize}\\pos(${centerX},${yPos})}${lines[ln]}`
+                textFilters.push(
+                    `drawtext=text='${lineText}':fontfile='${fontPath}':` +
+                    `fontsize=${fontSize}:fontcolor=white:${textStyle}:` +
+                    `x=(w-text_w)/2:y=${yPos}:${enb}:${fad}${shaping}`
                 );
             }
 
-            // ── Verse number ﴿N﴾ — below verse text ──
-            const vnY = blockY + totalTextHeight + Math.round(vnH * 0.5);
-            assEvents.push(
-                `Dialogue: 1,${startT},${endT},VerseNum,,0,0,0,,${fade}{\\fs${vnFS}\\pos(${centerX},${vnY})}﴿${verseNum}﴾`
+            // ── Verse number ﴿N﴾ ──
+            const vnText = prepareText(`\ufd3f${verseNum}\ufd3e`);
+            const vnY = blockY + totalTextHeight + 10;
+            textFilters.push(
+                `drawtext=text='${vnText}':fontfile='${fontPath}':` +
+                `fontsize=${vnFS}:fontcolor=#D4AF37:${textStyle}:` +
+                `x=(w-text_w)/2:y=${vnY}:${enb}:${fad}${shaping}`
             );
 
-            // ── Tafsir text — below verse number ──
+            // ── Tafsir ──
             if (hasTafsir) {
-                const tafsirRaw = normalizeArabicText(
-                    verses[i].tafsirText!.substring(0, 120) + (verses[i].tafsirText!.length > 120 ? '...' : '')
-                );
+                const tafsirRaw = verses[i].tafsirText!.substring(0, 120) + (verses[i].tafsirText!.length > 120 ? '...' : '');
                 const tafsirMaxChars = maxCharsPerLine + 10;
                 const tafsirLines = splitIntoLines(tafsirRaw, tafsirMaxChars).slice(0, 2);
                 const tafsirY = vnY + vnH;
                 for (let tl = 0; tl < tafsirLines.length; tl++) {
-                    assEvents.push(
-                        `Dialogue: 2,${startT},${endT},Tafsir,,0,0,0,,${fade}{\\fs${tafsirFS}\\pos(${centerX},${tafsirY + tl * tafsirLineH})}${tafsirLines[tl]}`
+                    const tText = prepareText(tafsirLines[tl]);
+                    textFilters.push(
+                        `drawtext=text='${tText}':fontfile='${fontPath}':` +
+                        `fontsize=${tafsirFS}:fontcolor=#E8E8E8:${textStyle}:` +
+                        `x=(w-text_w)/2:y=${tafsirY + tl * tafsirLineH}:${enb}:${fad}${shaping}`
                     );
                 }
             }
@@ -473,29 +443,18 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             cumulativeTime = end;
         }
 
-        // Write ASS subtitle file
-        const assContent = assHeader + assEvents.join('\n') + '\n';
-        const assFile = path.join(tmpDir, 'subs.ass');
-        fs.writeFileSync(assFile, assContent, 'utf8');
-
-        // 6) Final render — use subtitles filter (libass has HarfBuzz for Arabic shaping)
+        // 6) Final render
         const outputPath = path.join(tmpDir, 'output.mp4');
         const opacity = Math.max(0, Math.min(1, dimOpacity));
 
-        // Escape the ASS file path for FFmpeg filter
-        const assPathEscaped = assFile.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "'\\''");
-
-        // Filter chain: scale + dim + subtitles (with font directory for embedded font)
-        const fontsDir = path.join(process.cwd(), 'public', 'fonts').replace(/\\/g, '/').replace(/:/g, '\\:');
         const filterChain =
             `[0:v]trim=duration=${totalDuration},setpts=PTS-STARTPTS,fps=25,` +
             `scale=${width}:${height}:force_original_aspect_ratio=increase,` +
             `crop=${width}:${height},setsar=1,` +
             `drawbox=c=black@${opacity}:t=fill,` +
-            `subtitles='${assPathEscaped}':fontsdir='${fontsDir}'` +
+            textFilters.join(',') +
             `[vout]`;
 
-        // Write filter to file to avoid Windows ENAMETOOLONG
         const filterFile = path.join(tmpDir, 'filters.txt');
         fs.writeFileSync(filterFile, filterChain);
 
@@ -518,11 +477,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     '-movflags', '+faststart',
                 ])
                 .output(outputPath)
-                .on('progress', (p) => {
+                .on('progress', (p: any) => {
                     if (onProgress && p.percent) onProgress(Math.min(p.percent, 100));
                 })
                 .on('end', () => resolve())
-                .on('error', (e) => reject(e))
+                .on('error', (e: any) => reject(e))
                 .run();
         });
 
