@@ -92,8 +92,8 @@ export async function POST(req: NextRequest) {
         // Convert Node ReadStream to Web ReadableStream
         const webStream = new ReadableStream({
             start(controller) {
-                stream.on('data', (chunk: Buffer) => {
-                    controller.enqueue(new Uint8Array(chunk));
+                stream.on('data', (chunk) => {
+                    controller.enqueue(new Uint8Array(Buffer.from(chunk)));
                 });
                 stream.on('end', () => {
                     controller.close();
