@@ -41,12 +41,16 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
         }
 
-        if (to - from > 30) {
+        if (to - from > 10) {
             return NextResponse.json(
-                { error: 'Maximum 30 verses per video' },
+                { error: 'Maximum 10 verses per video (server limit)' },
                 { status: 400 }
             );
         }
+
+        // Cap resolution to avoid OOM on 512MB server
+        const safeWidth = Math.min(videoWidth, 854);
+        const safeHeight = Math.min(videoHeight, 480);
 
         // 1) Fetch verses
         console.log('[GEN] Step 1: fetching verses...');
@@ -90,8 +94,8 @@ export async function POST(req: NextRequest) {
         }));
 
         // 6) Generate video
-        console.log(`[GEN] Step 6: generating video (${videoWidth}x${videoHeight}, font=${fontFile})...`);
-        outputPath = await generateVideo(overlays, bgUrl, dimOpacity, videoWidth, videoHeight, fontFile);
+        console.log(`[GEN] Step 6: generating video (${safeWidth}x${safeHeight}, font=${fontFile})...`);
+        outputPath = await generateVideo(overlays, bgUrl, dimOpacity, safeWidth, safeHeight, fontFile);
         console.log(`[GEN] Step 6 done: ${outputPath}`);
         tmpDir = require('path').dirname(outputPath);
 
