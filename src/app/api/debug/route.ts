@@ -93,5 +93,24 @@ Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,Test
         info.assTestError = e.message?.substring(0, 1000);
     }
 
+    // 8) Drawtext test with Arabic text + text_shaping
+    try {
+        const testOut2 = '/tmp/test_dt.png';
+        const fontPath = path.join(process.cwd(), 'public', 'fonts', 'Amiri.ttf');
+        info.fontPathExists = fs.existsSync(fontPath);
+
+        const result2 = execSync(
+            `ffmpeg -y -f lavfi -i "color=c=black:s=320x240:d=1" -vf "drawtext=text='بسم الله الرحمن الرحيم':fontfile='${fontPath}':fontsize=24:fontcolor=white:x=(w-text_w)/2:y=(h-text_h)/2:text_shaping=1" -frames:v 1 ${testOut2} 2>&1`,
+            { encoding: 'utf8', timeout: 15000 }
+        );
+        info.drawtextTest = 'SUCCESS';
+        info.drawtextOutput = result2.substring(result2.length - 300);
+        try { fs.unlinkSync(testOut2); } catch { }
+    } catch (e: any) {
+        info.drawtextTest = 'FAILED';
+        info.drawtextError = e.message?.substring(0, 1000);
+        info.drawtextStderr = e.stderr?.substring(0, 1000);
+    }
+
     return NextResponse.json(info, { status: 200 });
 }
