@@ -134,8 +134,10 @@ export default function Home() {
       });
 
       if (!response.ok) {
-        const errData = await response.json().catch(() => ({ error: 'Unknown error' }));
-        throw new Error(errData.error || 'Video generation failed');
+        const errText = await response.text().catch(() => '');
+        let errMsg = `HTTP ${response.status}`;
+        try { const j = JSON.parse(errText); errMsg = j.error || j.details || errMsg; } catch { if (errText.length < 200) errMsg += ': ' + errText; }
+        throw new Error(errMsg);
       }
 
       setProgress(90);

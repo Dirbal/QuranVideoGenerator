@@ -49,18 +49,23 @@ export async function POST(req: NextRequest) {
         }
 
         // 1) Fetch verses
+        console.log('[GEN] Step 1: fetching verses...');
         const verses = await getVerses(chapter, from, to);
         if (!verses.length) {
             return NextResponse.json({ error: 'No verses found' }, { status: 404 });
         }
+        console.log(`[GEN] Step 1 done: ${verses.length} verses`);
 
         // 2) Fetch audio
+        console.log('[GEN] Step 2: fetching audio...');
         const audioFiles = await getAudioFiles(reciterId, chapter);
         const audioMap = new Map(audioFiles.map((a) => [a.verse_key, getAudioUrl(a.url)]));
+        console.log(`[GEN] Step 2 done: ${audioFiles.length} audio files`);
 
         // 3) Fetch tafsir if enabled
         const tafsirMap = new Map<string, string>();
         if (includeTafsir) {
+            console.log('[GEN] Step 3: fetching tafsir...');
             for (const v of verses) {
                 const text = await getTafsir(chapter, v.verse_number);
                 if (text) {
@@ -68,10 +73,13 @@ export async function POST(req: NextRequest) {
                     tafsirMap.set(v.verse_key, cleanText);
                 }
             }
+            console.log(`[GEN] Step 3 done: ${tafsirMap.size} tafsirs`);
         }
 
         // 4) Get background video
+        console.log('[GEN] Step 4: fetching background video...');
         const bgUrl = await getRandomVideoUrl(theme || 'nature');
+        console.log(`[GEN] Step 4 done: ${bgUrl?.substring(0, 60)}...`);
 
         // 5) Build verse overlays
         const overlays: VerseOverlay[] = verses.map((v) => ({
@@ -82,7 +90,9 @@ export async function POST(req: NextRequest) {
         }));
 
         // 6) Generate video
+        console.log(`[GEN] Step 6: generating video (${videoWidth}x${videoHeight}, font=${fontFile})...`);
         outputPath = await generateVideo(overlays, bgUrl, dimOpacity, videoWidth, videoHeight, fontFile);
+        console.log(`[GEN] Step 6 done: ${outputPath}`);
         tmpDir = require('path').dirname(outputPath);
 
         // 7) Stream the file as response (avoid loading entire file into memory)
